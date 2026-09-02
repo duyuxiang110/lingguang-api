@@ -9,9 +9,10 @@ WorkingDirectory=/opt/lingguang-api
 ExecStart=/opt/lingguang-api/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=5
+Environment=HOME=/tmp/lingguang
 MemoryMax=1.5G
 OOMScoreAdjust=500
-ReadWritePaths=/tmp/lingguang
+ReadWritePaths=/tmp/lingguang /opt/lingguang-api
 
 [Install]
 WantedBy=multi-user.target

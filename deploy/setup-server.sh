@@ -56,8 +56,14 @@ echo "=== 7. 配置 crontab 清理临时文件 ==="
 (crontab -l 2>/dev/null | grep -v 'find /tmp/lingguang'; echo '0 * * * * find /tmp/lingguang -mindepth 1 -mmin +60 -delete') | crontab -
 
 echo "=== 8. 配置 Nginx ==="
-NGINX_CONF="/etc/nginx/sites-available/lingguang"
-if [ -f "$NGINX_CONF" ]; then
+NGINX_CONF=""
+for f in /etc/nginx/conf.d/lingguang.conf /etc/nginx/sites-available/lingguang; do
+  if [ -f "$f" ]; then
+    NGINX_CONF="$f"
+    break
+  fi
+done
+if [ -n "$NGINX_CONF" ]; then
   if grep -q '/api/v2/' "$NGINX_CONF"; then
     echo "Nginx 已有 /api/v2/ 配置"
   else

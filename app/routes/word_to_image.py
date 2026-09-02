@@ -1,9 +1,9 @@
 import os
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Request
 from app.deps import get_auth_payload
-from app.concurrency import heavy_semaphore
+from app.concurrency import heavy_semaphore, check_memory
 from app.services.word_service import word_to_images
-from app.utils import validate_file_extension, check_disk_space, save_upload, create_work_dir, cleanup_dir
+from app.utils import validate_file_extension, check_disk_space, save_upload, create_work_dir, cleanup_dir, cleanup_file
 from app.config import MAX_FILE_SIZES
 
 router = APIRouter()
@@ -11,6 +11,7 @@ router = APIRouter()
 
 @router.post("/word-to-image")
 async def word_to_image_route(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     dpi: int = Form(default=150),
@@ -23,6 +24,8 @@ async def word_to_image_route(
         raise HTTPException(status_code=413, detail="文件超过 30MB 限制")
     if not check_disk_space():
         raise HTTPException(status_code=507, detail="服务器磁盘空间不足")
+    if not check_memory(400):
+        raise HTTPException(status_code=507, detail="服务器内存不足，请稍后再试")
 
     content = await file.read()
     input_path = save_upload(content, ".docx")
@@ -30,9 +33,18 @@ async def word_to_image_route(
 
     try:
         async with heavy_semaphore:
-            images = await word_to_images(input_path, work_dir, dpi=dpi, fmt=format)
+            if await request.is_disconnected():
+                raise HTTPException(499, "客户端已取消")
+            images = await word_to_images(input_path, work_dir, dpi=dpi, fmt=format, request=request)
         return {"success": True, "data": {"images": images}}
+    except HTTPException:
+        cleanup_dir(work_dir)
+        cleanup_file(input_path)
+        raise
     except Exception as e:
+        cleanup_dir(work_dir)
+        cleanup_file(input_path)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         background_tasks.add_task(cleanup_dir, work_dir)
+        background_tasks.add_task(cleanup_file, input_path)

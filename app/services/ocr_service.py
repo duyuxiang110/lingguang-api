@@ -1,3 +1,5 @@
+import gc
+
 _ocr_engine = None
 
 
@@ -31,5 +33,8 @@ def recognize_image(image_path: str, lang: str = "ch") -> dict:
 
     full_text = "\n".join(texts)
     avg_confidence = round(sum(confidences) / len(confidences) * 100) if confidences else 0
+
+    del result
+    gc.collect()
 
     return {"text": full_text, "confidence": avg_confidence}

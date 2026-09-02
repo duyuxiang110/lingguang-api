@@ -5,12 +5,12 @@
 import os
 import asyncio
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.deps import get_auth_payload
-from app.concurrency import light_semaphore
-from app.utils import validate_file_extension, check_disk_space, create_work_dir, cleanup_dir
+from app.concurrency import light_semaphore, run_subprocess_safe, check_memory
+from app.utils import validate_file_extension, check_disk_space, create_work_dir, cleanup_dir, cleanup_file, save_upload
 from app.config import MAX_FILE_SIZES
 
 router = APIRouter()
@@ -29,28 +29,9 @@ FORMAT_CONFIG = {
 }
 
 
-async def _run_ffprobe(path: str) -> dict:
-    proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
-    import json
-    meta = json.loads(stdout)
-    vs = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
-    fmt = meta.get("format", {})
-    return {
-        "duration": float(fmt.get("duration", 0)),
-        "width": int(vs.get("width", 0)),
-        "height": int(vs.get("height", 0)),
-        "bitrate": int(fmt.get("bit_rate", 0)),
-        "size": int(fmt.get("size", 0)),
-        "formatName": fmt.get("format_name", ""),
-    }
-
-
-@router.post("/v2/video-info")
+@router.post("/tools/video-info")
 async def video_info(
+    request: Request,
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     _payload: dict = Depends(get_auth_payload),
@@ -64,26 +45,49 @@ async def video_info(
 
     content = await video.read()
     ext = os.path.splitext(video.filename)[1].lower()
-    from app.utils import save_upload
     input_path = save_upload(content, ext)
     work_dir = create_work_dir()
 
     try:
         async with light_semaphore:
-            info = await _run_ffprobe(input_path)
+            if await request.is_disconnected():
+                raise HTTPException(499, "客户端已取消")
+            stdout, stderr, returncode = await run_subprocess_safe(
+                request,
+                ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path],
+                timeout=30,
+            )
+            if returncode != 0:
+                raise RuntimeError(f"ffprobe 失败: {stderr.decode(errors='replace')[:500]}")
+            import json
+            meta = json.loads(stdout)
+            vs = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
+            fmt = meta.get("format", {})
+            info = {
+                "duration": float(fmt.get("duration", 0)),
+                "width": int(vs.get("width", 0)),
+                "height": int(vs.get("height", 0)),
+                "bitrate": int(fmt.get("bit_rate", 0)),
+                "size": int(fmt.get("size", 0)),
+                "formatName": fmt.get("format_name", ""),
+            }
         return {"success": True, "data": info}
+    except HTTPException:
+        cleanup_dir(work_dir)
+        cleanup_file(input_path)
+        raise
     except Exception as e:
+        cleanup_dir(work_dir)
+        cleanup_file(input_path)
         raise HTTPException(500, detail={"success": False, "message": str(e)})
     finally:
         background_tasks.add_task(cleanup_dir, work_dir)
-        try:
-            os.unlink(input_path)
-        except OSError:
-            pass
+        background_tasks.add_task(cleanup_file, input_path)
 
 
-@router.post("/v2/video-compress")
+@router.post("/tools/video-compress")
 async def video_compress(
+    request: Request,
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     format: str = Form("mp4"),
@@ -97,6 +101,8 @@ async def video_compress(
         raise HTTPException(413, detail={"success": False, "message": "文件超过 500MB 限制"})
     if not check_disk_space():
         raise HTTPException(507, detail={"success": False, "message": "服务器磁盘空间不足"})
+    if not check_memory(400):
+        raise HTTPException(507, detail={"success": False, "message": "服务器内存不足，请稍后再试"})
 
     fmt = FORMAT_CONFIG.get(format)
     if not fmt:
@@ -104,7 +110,6 @@ async def video_compress(
 
     content = await video.read()
     ext = os.path.splitext(video.filename)[1].lower()
-    from app.utils import save_upload
     input_path = save_upload(content, ext)
     work_dir = create_work_dir()
     output_name = os.path.basename(input_path).replace("upload_", "output_").replace(ext, "") + fmt["ext"]
@@ -131,10 +136,9 @@ async def video_compress(
         cmd += ["-y", output_path]
 
         async with light_semaphore:
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"ffmpeg 处理失败: {stderr.decode()[:500]}")
+            stdout, stderr, returncode = await run_subprocess_safe(request, cmd, timeout=600)
+            if returncode != 0:
+                raise RuntimeError(f"ffmpeg 处理失败: {stderr.decode(errors='replace')[:500]}")
 
         if not os.path.exists(output_path):
             raise RuntimeError("压缩输出文件不存在")
@@ -144,11 +148,8 @@ async def video_compress(
         download_name = f"{original}_compressed{fmt['ext']}"
 
         def cleanup():
-            try:
-                os.unlink(input_path)
-                os.unlink(output_path)
-            except OSError:
-                pass
+            cleanup_file(input_path)
+            cleanup_file(output_path)
 
         background_tasks.add_task(cleanup)
 
@@ -161,10 +162,12 @@ async def video_compress(
             "X-Output-Size": str(stat.st_size),
         }
         return StreamingResponse(iterfile(), media_type=fmt["mime"], headers=headers)
+    except HTTPException:
+        cleanup_dir(work_dir)
+        cleanup_file(input_path)
+        cleanup_file(output_path)
+        raise
     except Exception as e:
         for p in [input_path, output_path]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
+            cleanup_file(p)
         raise HTTPException(500, detail={"success": False, "message": str(e)})

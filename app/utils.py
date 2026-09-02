@@ -36,3 +36,11 @@ def cleanup_dir(path: str) -> None:
             shutil.rmtree(path, ignore_errors=True)
     except Exception:
         pass
+
+
+def cleanup_file(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except Exception:
+        pass

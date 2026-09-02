@@ -12,7 +12,8 @@ RestartSec=5
 Environment=HOME=/tmp/lingguang
 MemoryMax=1.5G
 OOMScoreAdjust=500
-ReadWritePaths=/tmp/lingguang /opt/lingguang-api
+ExecStartPre=/bin/mkdir -p /tmp/lingguang/uploads /tmp/lingguang/work /tmp/lingguang/output
+ExecStartPre=/bin/chown -R www-data:www-data /tmp/lingguang
 
 [Install]
 WantedBy=multi-user.target

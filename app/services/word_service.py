@@ -4,7 +4,7 @@ import glob
 import base64
 
 from app.config import LIBREOFFICE_TIMEOUT
-from app.concurrency import run_subprocess_safe
+from app.concurrency import run_subprocess_safe, release_memory
 
 
 async def libreoffice_convert(input_path: str, output_dir: str, target_format: str, request=None) -> str:
@@ -54,12 +54,16 @@ def render_pdf_to_images(pdf_path: str, output_dir: str, dpi: int = 150, fmt: st
     """用 pdf2image 将 PDF 每页渲染为图片，返回图片路径列表。"""
     from pdf2image import convert_from_path
 
-    fmt_ext = "jpg" if fmt == "image/jpeg" else "png"
-    images = convert_from_path(pdf_path, dpi=dpi, fmt=fmt_ext, output_folder=output_dir)
+    is_jpeg = fmt == "image/jpeg"
+    ext = "jpg" if is_jpeg else "png"
+    pil_format = "JPEG" if is_jpeg else "PNG"
+
+    # 不传 output_folder，避免 pdf2image 用错误的 PIL 格式保存
+    images = convert_from_path(pdf_path, dpi=dpi)
     paths = []
     for i, img in enumerate(images):
-        path = os.path.join(output_dir, f"page_{i:04d}.{fmt_ext}")
-        img.save(path, fmt_ext.upper(), quality=92 if fmt_ext == "jpg" else None)
+        path = os.path.join(output_dir, f"page_{i:04d}.{ext}")
+        img.save(path, pil_format, quality=92 if is_jpeg else None)
         paths.append(path)
     return paths
 
@@ -74,9 +78,17 @@ async def word_to_images(input_path: str, work_dir: str, dpi: int = 150, fmt: st
     pdf_path = await libreoffice_convert(input_path, work_dir, "pdf", request=request)
     fmt_arg = "image/jpeg" if fmt == "jpg" else "image/png"
     image_paths = render_pdf_to_images(pdf_path, work_dir, dpi=dpi, fmt=fmt_arg)
-    return [image_to_base64(p) for p in image_paths]
+    result = [image_to_base64(p) for p in image_paths]
+
+    # 释放渲染过程中产生的临时内存
+    del image_paths
+    release_memory()
+
+    return result
 
 
 async def word_to_pdf_file(input_path: str, work_dir: str, request=None) -> str:
     """Word → PDF (LibreOffice)，返回 PDF 文件路径。"""
-    return await libreoffice_convert(input_path, work_dir, "pdf", request=request)
+    pdf_path = await libreoffice_convert(input_path, work_dir, "pdf", request=request)
+    release_memory()
+    return pdf_path

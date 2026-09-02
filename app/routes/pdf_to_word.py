@@ -4,7 +4,7 @@ import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from app.deps import get_auth_payload
-from app.concurrency import light_semaphore, heavy_semaphore, check_memory
+from app.concurrency import light_semaphore, heavy_semaphore, check_memory, release_memory
 from app.services.pdf_service import pdf_to_word_text, pdf_to_word_image
 from app.utils import validate_file_extension, check_disk_space, save_upload, create_work_dir, cleanup_dir, cleanup_file
 from app.config import MAX_FILE_SIZES
@@ -44,6 +44,8 @@ async def pdf_to_word_route(
                 await loop.run_in_executor(None, pdf_to_word_image, input_path, output_path)
             else:
                 await loop.run_in_executor(None, pdf_to_word_text, input_path, output_path)
+
+        release_memory()
 
         if await request.is_disconnected():
             raise HTTPException(499, "客户端已取消")

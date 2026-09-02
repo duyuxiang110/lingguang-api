@@ -1,5 +1,7 @@
 import asyncio
 import os
+import gc
+import ctypes
 
 from fastapi import HTTPException
 
@@ -51,7 +53,7 @@ async def run_subprocess_safe(request, cmd: list, timeout: int = 120):
         raise
 
 
-def check_memory(threshold_mb: int = 300) -> bool:
+def check_memory(threshold_mb: int = 100) -> bool:
     """Return True if available memory is above threshold."""
     try:
         with open("/proc/meminfo") as f:
@@ -62,3 +64,16 @@ def check_memory(threshold_mb: int = 300) -> bool:
     except Exception:
         pass
     return True
+
+
+def release_memory():
+    """Release freed memory back to the OS (Linux/glibc only).
+
+    Python's pymalloc doesn't return freed memory to the OS.
+    malloc_trim(0) forces glibc to release free heap memory.
+    """
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass

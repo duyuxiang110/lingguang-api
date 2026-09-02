@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -5,6 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.routes import word_to_image, word_to_pdf, ocr, pdf_to_word, auth, users, video
+
+
+async def _ocr_idle_monitor():
+    """每 60 秒检查 PaddleOCR 是否空闲超时，超时则卸载释放 ~500MB 内存。"""
+    while True:
+        await asyncio.sleep(60)
+        from app.services.ocr_service import unload_ocr_engine_if_idle
+        unload_ocr_engine_if_idle()
 
 
 @asynccontextmanager
@@ -21,8 +30,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[lingguang-api] 数据库表初始化失败: {e}")
 
-    # PaddleOCR 不再预加载 — 节省 ~500MB 空闲内存
-    # OCR 引擎将在首次请求时懒加载
+    # PaddleOCR 不预加载 — 首次请求时懒加载，5 分钟空闲后自动卸载
+    asyncio.create_task(_ocr_idle_monitor())
 
     yield
     print("[lingguang-api] 服务关闭")

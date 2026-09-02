@@ -101,7 +101,7 @@ async def video_compress(
         raise HTTPException(413, detail={"success": False, "message": "文件超过 500MB 限制"})
     if not check_disk_space():
         raise HTTPException(507, detail={"success": False, "message": "服务器磁盘空间不足"})
-    if not check_memory(400):
+    if not check_memory(100):
         raise HTTPException(507, detail={"success": False, "message": "服务器内存不足，请稍后再试"})
 
     fmt = FORMAT_CONFIG.get(format)

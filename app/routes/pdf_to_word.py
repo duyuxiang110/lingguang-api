@@ -26,7 +26,7 @@ async def pdf_to_word_route(
         raise HTTPException(status_code=413, detail="文件超过 50MB 限制")
     if not check_disk_space():
         raise HTTPException(status_code=507, detail="服务器磁盘空间不足")
-    if not check_memory(400):
+    if not check_memory(100):
         raise HTTPException(status_code=507, detail="服务器内存不足，请稍后再试")
 
     content = await file.read()

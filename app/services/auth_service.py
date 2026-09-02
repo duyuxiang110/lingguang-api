@@ -24,12 +24,14 @@ def _verify_password(password_md5: str, password_hash: str) -> bool:
 
 
 def _generate_tokens(user: dict, device_info: str = None, ip_address: str = None) -> dict:
+    import time
+    now = int(time.time())
     access_token = jwt.encode(
-        {"userId": user["id"], "username": user["username"], "role": user["role"]},
+        {"userId": user["id"], "username": user["username"], "role": user["role"], "exp": now + 2 * 3600},
         JWT_SECRET, algorithm="HS256",
     )
     refresh_token = jwt.encode(
-        {"userId": user["id"], "type": "refresh"},
+        {"userId": user["id"], "type": "refresh", "jti": str(uuid.uuid4()), "exp": now + 7 * 24 * 3600},
         JWT_REFRESH_SECRET, algorithm="HS256",
     )
     expires_at = datetime.now() + timedelta(days=7)

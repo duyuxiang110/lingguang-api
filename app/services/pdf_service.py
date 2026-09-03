@@ -2,7 +2,31 @@ import os
 
 
 def pdf_to_word_text(pdf_path: str, output_path: str) -> int:
-    """文本模式：pdfplumber 提取文本和表格 → python-docx 生成 Word。返回页数。"""
+    """文本模式：pdf2docx 高保真还原版式，失败时回退到纯文本提取。返回页数。"""
+    try:
+        return _pdf_to_word_layout(pdf_path, output_path)
+    except Exception as e:
+        print(f"[pdf2word] pdf2docx 转换失败，回退纯文本模式: {e}")
+        return _pdf_to_word_plain(pdf_path, output_path)
+
+
+def _pdf_to_word_layout(pdf_path: str, output_path: str) -> int:
+    """高保真模式：pdf2docx 还原字体/版式/表格/图片。返回页数。"""
+    import fitz
+    from pdf2docx import Converter
+
+    page_count = fitz.open(pdf_path).page_count
+    # multi_processing=False：服务器内存有限，避免多进程占用翻倍
+    cv = Converter(pdf_path)
+    try:
+        cv.convert(output_path, multi_processing=False)
+    finally:
+        cv.close()
+    return page_count
+
+
+def _pdf_to_word_plain(pdf_path: str, output_path: str) -> int:
+    """纯文本兜底：pdfplumber 提取文本和表格 → python-docx 生成 Word。返回页数。"""
     import pdfplumber
     from docx import Document
 

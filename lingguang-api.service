@@ -10,9 +10,10 @@ ExecStart=/opt/lingguang-api/venv/bin/uvicorn app.main:app --host 127.0.0.1 --po
 Restart=always
 RestartSec=5
 Environment=HOME=/tmp/lingguang
-MemoryMax=1.5G
+Environment=LAMA_MODEL=/opt/lingguang-api/models/big-lama.pt
+MemoryMax=2G
 OOMScoreAdjust=500
-ExecStartPre=/bin/mkdir -p /tmp/lingguang/uploads /tmp/lingguang/work /tmp/lingguang/output
+ExecStartPre=/bin/mkdir -p /tmp/lingguang/uploads /tmp/lingguang/work /tmp/lingguang/output /opt/lingguang-api/models
 ExecStartPre=/bin/chown -R www-data:www-data /tmp/lingguang
 
 [Install]

@@ -151,3 +151,128 @@ def test_model_error_propagates(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError):
         watermark_service.remove_watermark(str(img), str(msk), str(out))
+
+
+# ===== 路由层测试（最小 app，只挂 watermark 路由，避免引入全部依赖） =====
+import io
+import jwt as pyjwt
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from app.config import JWT_SECRET
+from app.routes import watermark as watermark_route
+
+_route_app = FastAPI()
+_route_app.include_router(watermark_route.router, prefix="/api/v2")
+client = TestClient(_route_app)
+
+
+def _auth_header():
+    token = pyjwt.encode(
+        {"sub": "u1", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _png_bytes(size=(60, 40)):
+    buf = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 30)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_route_requires_auth():
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        files={"file": ("a.png", _png_bytes(), "image/png"),
+               "mask": ("m.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 401
+
+
+def test_route_rejects_bad_extension():
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        headers=_auth_header(),
+        files={"file": ("a.txt", b"hello", "text/plain"),
+               "mask": ("m.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 422
+
+
+def test_route_rejects_oversize():
+    big = b"\x89PNG" + b"0" * (11 * 1024 * 1024)
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        headers=_auth_header(),
+        files={"file": ("big.png", big, "image/png"),
+               "mask": ("m.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 413
+
+
+def test_route_success(tmp_path, monkeypatch):
+    """成功路径：mock service，验证 200 + media_type + 下载文件名"""
+    out_file = tmp_path / "result.png"
+    Image.new("RGB", (60, 40), (0, 255, 0)).save(out_file)
+
+    def fake_remove(image_path, mask_path, output_path):
+        assert image_path.endswith(".png")
+        assert mask_path.endswith(".png")
+        Image.new("RGB", (60, 40), (0, 255, 0)).save(output_path)
+        return output_path
+
+    monkeypatch.setattr(watermark_route, "remove_watermark", fake_remove)
+
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        headers=_auth_header(),
+        files={"file": ("照片.png", _png_bytes(), "image/png"),
+               "mask": ("mask.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    cd = resp.headers["content-disposition"]
+    assert "filename*=utf-8''" in cd.lower() or "_" in cd
+    assert resp.content[:4] == b"\x89PNG"
+
+
+def test_route_model_failure_503(tmp_path, monkeypatch):
+    """模型异常 → 503 + 明确提示，不返回劣质结果"""
+    def boom(image_path, mask_path, output_path):
+        raise RuntimeError("cuda oom")
+
+    monkeypatch.setattr(watermark_route, "remove_watermark", boom)
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        headers=_auth_header(),
+        files={"file": ("a.png", _png_bytes(), "image/png"),
+               "mask": ("m.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 503
+
+
+def test_route_empty_mask_422(tmp_path, monkeypatch):
+    """空蒙版（service 抛 ValueError）→ 422"""
+    def empty(image_path, mask_path, output_path):
+        raise ValueError("蒙版为空")
+
+    monkeypatch.setattr(watermark_route, "remove_watermark", empty)
+    resp = client.post(
+        "/api/v2/remove-watermark",
+        headers=_auth_header(),
+        files={"file": ("a.png", _png_bytes(), "image/png"),
+               "mask": ("m.png", _png_bytes(), "image/png")},
+    )
+    assert resp.status_code == 422
+
+
+def test_route_registered_in_main():
+    """main.py 已注册 watermark 路由（不 import main，避免拉起全部重依赖）"""
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "main.py"
+    text = src.read_text(encoding="utf-8")
+    assert re.search(r"from app\.routes import .*watermark", text)
+    assert re.search(r"include_router\(watermark\.router, prefix=\"/api/v2\"\)", text)

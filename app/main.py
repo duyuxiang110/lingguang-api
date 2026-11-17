@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routes import word_to_image, word_to_pdf, ocr, pdf_to_word, auth, users, video
+from app.routes import word_to_image, word_to_pdf, ocr, pdf_to_word, auth, users, video, watermark
 
 
 @asynccontextmanager
@@ -60,3 +60,4 @@ app.include_router(word_to_image.router, prefix="/api/v2")
 app.include_router(word_to_pdf.router, prefix="/api/v2")
 app.include_router(ocr.router, prefix="/api/v2")
 app.include_router(pdf_to_word.router, prefix="/api/v2")
+app.include_router(watermark.router, prefix="/api/v2")

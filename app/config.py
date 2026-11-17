@@ -34,6 +34,7 @@ MAX_FILE_SIZES = {
     "ocr": 10 * 1024 * 1024,
     "pdf_to_word": 50 * 1024 * 1024,
     "video": 500 * 1024 * 1024,
+    "watermark": 10 * 1024 * 1024,
 }
 
 LIBREOFFICE_TIMEOUT = 60

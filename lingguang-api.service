@@ -13,7 +13,8 @@ Environment=HOME=/tmp/lingguang
 Environment=LAMA_MODEL=/opt/lingguang-api/models/big-lama.pt
 # 服务器仅 1.6GB 内存，LaMa 单次推理长边压到 1024 控峰值（大图裁剪区会降采样后修复）
 Environment=LAMA_MAX_SIDE=1024
-MemoryMax=2G
+# 硬顶低于物理内存：推理吃爆时只杀本服务（Restart=always 自动拉起），不把整机拖入 swap 假死
+MemoryMax=1.2G
 OOMScoreAdjust=500
 ExecStartPre=/bin/mkdir -p /tmp/lingguang/uploads /tmp/lingguang/work /tmp/lingguang/output /opt/lingguang-api/models
 ExecStartPre=/bin/chown -R www-data:www-data /tmp/lingguang

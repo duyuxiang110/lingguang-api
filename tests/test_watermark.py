@@ -17,6 +17,16 @@ class FakeLama:
         return Image.new("RGB", image.size, (0, 255, 0))
 
 
+class PaddedFakeLama:
+    """替身：模拟 simple-lama-inpainting 0.1.2 的输出——右/下 pad 到 8 倍数"""
+
+    def __call__(self, image, mask):
+        w, h = image.size
+        pw = w + (8 - w % 8) % 8
+        ph = h + (8 - h % 8) % 8
+        return Image.new("RGB", (pw, ph), (0, 255, 0))
+
+
 @pytest.fixture
 def calls(monkeypatch):
     recorded = []
@@ -153,6 +163,37 @@ def test_model_error_propagates(tmp_path, monkeypatch):
         watermark_service.remove_watermark(str(img), str(msk), str(out))
 
 
+def test_padded_output_cropped_back_small(tmp_path, monkeypatch):
+    """小图路径：模型输出带 mod8 pad（197x115 → 200x120）时必须裁回原尺寸"""
+    monkeypatch.setattr(watermark_service, "_get_lama", lambda: PaddedFakeLama())
+    img = tmp_path / "in.png"
+    msk = tmp_path / "m.png"
+    out = tmp_path / "out.png"
+    _make_image(img, (197, 115))
+    _make_mask(msk, (197, 115), (50, 40, 80, 60))
+
+    watermark_service.remove_watermark(str(img), str(msk), str(out))
+
+    assert Image.open(out).size == (197, 115)
+
+
+def test_padded_output_cropped_back_large(tmp_path, monkeypatch):
+    """大图路径：裁剪区送模型后输出带 pad，贴回前必须裁掉，整图尺寸不变"""
+    monkeypatch.setattr(watermark_service, "_get_lama", lambda: PaddedFakeLama())
+    img = tmp_path / "big.png"
+    msk = tmp_path / "m.png"
+    out = tmp_path / "out.png"
+    _make_image(img, (2997, 1999), (123, 200, 90))
+    _make_mask(msk, (2997, 1999), (100, 100, 300, 250))
+
+    watermark_service.remove_watermark(str(img), str(msk), str(out))
+
+    opened = Image.open(out).convert("RGB")
+    assert opened.size == (2997, 1999)
+    assert opened.getpixel((200, 180)) == (0, 255, 0)
+    assert opened.getpixel((2996, 1998)) == (123, 200, 90)
+
+
 # ===== 路由层测试（最小 app，只挂 watermark 路由，避免引入全部依赖） =====
 import io
 import jwt as pyjwt
@@ -165,6 +206,13 @@ from app.routes import watermark as watermark_route
 _route_app = FastAPI()
 _route_app.include_router(watermark_route.router, prefix="/api/v2")
 client = TestClient(_route_app)
+
+
+@pytest.fixture(autouse=True)
+def _bypass_host_checks(monkeypatch):
+    """路由测试不依赖宿主机的磁盘/内存余量，固定放行前置检查"""
+    monkeypatch.setattr(watermark_route, "check_disk_space", lambda *a, **k: True)
+    monkeypatch.setattr(watermark_route, "check_memory", lambda *a, **k: True)
 
 
 def _auth_header():

@@ -53,7 +53,8 @@ def _crop_bounds(mask: np.ndarray, img_w: int, img_h: int) -> tuple:
     """蒙版包围盒外扩 margin 并夹到图像范围内，返回 (x0, x1, y0, y1)"""
     ys, xs = np.where(mask > 0)
     x0, x1, y0, y1 = int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())
-    margin = max(int(max(x1 - x0, y1 - y0) * CROP_MARGIN_RATIO), CROP_MARGIN_MIN)
+    margin = max(int(max(x1 - x0, y1 - y0) *
+                 CROP_MARGIN_RATIO), CROP_MARGIN_MIN)
     return (
         max(0, x0 - margin),
         min(img_w, x1 + margin + 1),

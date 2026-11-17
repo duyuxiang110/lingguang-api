@@ -10,8 +10,10 @@ DB_CONFIG = {
 }
 
 # ===== JWT =====
-JWT_SECRET = os.environ.get("JWT_SECRET", "sso-secret-key-change-in-production-2024")
-JWT_REFRESH_SECRET = os.environ.get("JWT_REFRESH_SECRET", "sso-refresh-secret-key-change-in-production-2024")
+JWT_SECRET = os.environ.get(
+    "JWT_SECRET", "sso-secret-key-change-in-production-2024")
+JWT_REFRESH_SECRET = os.environ.get(
+    "JWT_REFRESH_SECRET", "sso-refresh-secret-key-change-in-production-2024")
 JWT_ACCESS_EXPIRY = "2h"
 JWT_REFRESH_EXPIRY = "7d"
 

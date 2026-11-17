@@ -30,7 +30,8 @@ async def remove_watermark_route(
     user: dict = Depends(get_auth_payload),
 ):
     if not validate_file_extension(file.filename, IMAGE_EXTS):
-        raise HTTPException(status_code=422, detail="仅支持图片格式 (JPG/PNG/BMP/WEBP)")
+        raise HTTPException(
+            status_code=422, detail="仅支持图片格式 (JPG/PNG/BMP/WEBP)")
     if not validate_file_extension(mask.filename, [".png"]):
         raise HTTPException(status_code=422, detail="蒙版仅支持 PNG 格式")
     if file.size and file.size > MAX_FILE_SIZES["watermark"]:
